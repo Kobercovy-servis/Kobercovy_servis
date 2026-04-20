@@ -1,580 +1,394 @@
-// app.js
-(() => {
-  const CFG = window.APP_CONFIG || {};
+const CFG = window.APP_CONFIG || {};
 
-  // ===== Helpers =====
-  function escapeHtml(s){
-    return String(s ?? "")
-      .replaceAll("&","&amp;")
-      .replaceAll("<","&lt;")
-      .replaceAll(">","&gt;")
-      .replaceAll('"',"&quot;")
-      .replaceAll("'","&#039;");
+const mapEl = document.getElementById("map");
+const mapStatusEl = document.getElementById("mapStatus");
+const placesListEl = document.getElementById("placesList");
+const addrInput = document.getElementById("addr");
+const searchAddrBtn = document.getElementById("searchAddrBtn");
+const geoBtn = document.getElementById("geoBtn");
+const reloadBtn = document.getElementById("reloadBtn");
+
+let map;
+let geocoder;
+let infoWindow;
+let markers = [];
+let userMarker = null;
+let placesCache = [];
+
+function cleanStr(v) {
+  return (v ?? "").toString().trim();
+}
+
+function escapeHtml(str) {
+  return cleanStr(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function toNum(v) {
+  const n = parseFloat(cleanStr(v).replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeKey(key) {
+  return cleanStr(key)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+function pick(row, keys) {
+  for (const key of keys) {
+    const normalized = normalizeKey(key);
+    if (normalized in row) return cleanStr(row[normalized]);
   }
+  return "";
+}
 
-  function cleanStr(s){ return String(s ?? "").trim(); }
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let inQuotes = false;
 
-  // CSV parser (jednoduchý + zvládá uvozovky)
-  function parseCSV(text){
-    const rows = [];
-    let row = [];
-    let cur = "";
-    let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
 
-    for(let i=0;i<text.length;i++){
-      const c = text[i];
-
-      if(c === '"'){
-        // "" uvnitř uvozovek = escape "
-        if(inQuotes && text[i+1] === '"'){ cur += '"'; i++; }
-        else inQuotes = !inQuotes;
-        continue;
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        value += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
       }
-
-      if(!inQuotes && (c === ",")){
-        row.push(cur);
-        cur = "";
-        continue;
-      }
-
-      if(!inQuotes && (c === "\n")){
-        row.push(cur);
-        rows.push(row);
-        row = [];
-        cur = "";
-        continue;
-      }
-
-      if(c !== "\r") cur += c;
+    } else if (char === "," && !inQuotes) {
+      row.push(value);
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") i++;
+      row.push(value);
+      if (row.some(cell => cleanStr(cell) !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
     }
-
-    // poslední buňka
-    row.push(cur);
-    rows.push(row);
-
-    // odstranění prázdných řádků na konci
-    while(rows.length && rows[rows.length-1].every(x => String(x).trim() === "")) rows.pop();
-
-    return rows;
   }
 
-  function csvToObjects(csvText){
-    const rows = parseCSV(csvText);
-    if(!rows.length) return [];
-    const header = rows[0].map(h => cleanStr(h));
-    const out = [];
+  row.push(value);
+  if (row.some(cell => cleanStr(cell) !== "")) rows.push(row);
 
-    for(let i=1;i<rows.length;i++){
-      const r = rows[i];
-      const obj = {};
-      header.forEach((h, idx) => obj[h] = r[idx] ?? "");
-      out.push(obj);
-    }
-    return out;
-  }
+  if (!rows.length) return [];
 
-  function toNum(x){
-    const n = Number(String(x ?? "").replace(",", "."));
-    return Number.isFinite(n) ? n : null;
-  }
-
-  // ===== Footer year =====
-  const y = document.getElementById("y");
-  if (y) y.textContent = new Date().getFullYear();
-
-  // ===== HERO SLIDESHOW =====
-  (function heroSlideshow(){
-    const imgEl = document.getElementById('heroMachine');
-    if(!imgEl) return;
-
-    const frames = [
-      './assets/linka.png',
-      './assets/centrifuga.png',
-      './assets/susicka.png',
-      './assets/vysavac.png',
-      './assets/klepac.png'
-    ];
-
-    frames.forEach(src => { const i = new Image(); i.src = src; });
-
-    let i = 0;
-    const stepMs = 3000;
-    const fadeMs = 350;
-
-    setInterval(() => {
-      imgEl.classList.add('isFading');
-      setTimeout(() => {
-        i = (i + 1) % frames.length;
-        imgEl.src = frames[i];
-        imgEl.classList.remove('isFading');
-      }, fadeMs);
-    }, stepMs);
-  })();
-
-  // ===== FORM (Formspree) =====
-  const form = document.getElementById('inquiryForm');
-  const formStatus = document.getElementById('formStatus');
-  const sendBtn = document.getElementById('sendBtn');
-
-  if(form){
-    const action = cleanStr(CFG.FORMSPREE_ACTION);
-    if(action) form.setAttribute('action', action);
-
-    form.addEventListener('submit', async (e) => {
-      const actionUrl = cleanStr(form.getAttribute('action'));
-
-      if(!actionUrl || actionUrl.includes('YOUR_FORM_ID')){
-        e.preventDefault();
-        if(formStatus){
-          formStatus.textContent = 'Nejdřív doplň Formspree URL v config.js (FORMSPREE_ACTION).';
-          formStatus.style.color = 'rgba(220,38,38,.95)';
-        }
-        return;
-      }
-
-      e.preventDefault();
-      if(formStatus){
-        formStatus.textContent = 'Odesílám…';
-        formStatus.style.color = 'inherit';
-      }
-      if(sendBtn) sendBtn.disabled = true;
-
-      try{
-        const fd = new FormData(form);
-        const res = await fetch(actionUrl, {
-          method: 'POST',
-          body: fd,
-          headers: { 'Accept': 'application/json' }
-        });
-
-        if(res.ok){
-          form.reset();
-          if(formStatus){
-            formStatus.textContent = 'Hotovo. Poptávka byla odeslána.';
-            formStatus.style.color = 'rgba(22,163,74,.95)';
-          }
-        }else{
-          if(formStatus){
-            formStatus.textContent = 'Nepovedlo se odeslat. Zkuste to znovu nebo napište na email.';
-            formStatus.style.color = 'rgba(220,38,38,.95)';
-          }
-        }
-      }catch(err){
-        if(formStatus){
-          formStatus.textContent = 'Chyba připojení. Zkuste to znovu nebo napište na email.';
-          formStatus.style.color = 'rgba(220,38,38,.95)';
-        }
-      }finally{
-        if(sendBtn) sendBtn.disabled = false;
-      }
+  const headers = rows[0].map(h => normalizeKey(h));
+  return rows.slice(1).map(cols => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h] = cols[i] ?? "";
     });
-  }
+    return obj;
+  });
+}
 
-  // ====== CALC (AUTO + MULTI) ======
-  const PRICE_CLEAN_PER_M2 = CFG.PRICE_CLEAN_PER_M2 ?? 300;
-  const PRICE_EDGE_PER_M    = CFG.PRICE_EDGE_PER_M ?? 99;
-  const PRICE_IMP_PER_M2    = CFG.PRICE_IMP_PER_M2 ?? 40;
+function setStatus(text) {
+  if (mapStatusEl) mapStatusEl.textContent = text;
+}
 
-  const rugsEl = document.getElementById('rugs');
-  const addRugBtn = document.getElementById('addRugBtn');
-  const resetRugsBtn = document.getElementById('resetRugsBtn');
+function buildInfoContent(place) {
+  return `
+    <div style="min-width:220px;line-height:1.5">
+      <strong>${escapeHtml(place.name)}</strong><br>
+      ${place.address ? `${escapeHtml(place.address)}<br>` : ""}
+      ${place.hours ? `Otevírací doba: ${escapeHtml(place.hours)}<br>` : ""}
+      ${place.phone ? `Tel: ${escapeHtml(place.phone)}<br>` : ""}
+      ${place.email ? `Email: ${escapeHtml(place.email)}<br>` : ""}
+      ${place.web ? `<a href="${escapeHtml(place.web)}" target="_blank" rel="noopener noreferrer">Web</a>` : ""}
+    </div>
+  `;
+}
 
-  const sumAreaEl = document.getElementById('sumArea');
-  const sumPerimEl = document.getElementById('sumPerim');
-  const sumTotalEl = document.getElementById('sumTotal');
-  const sumBreakdownEl = document.getElementById('sumBreakdown');
+function renderPlacesList(places) {
+  if (!placesListEl) return;
 
-  function round2(n){ return Math.round(n * 100) / 100; }
-  function czk(n){ return new Intl.NumberFormat('cs-CZ', { maximumFractionDigits: 0 }).format(n); }
-  function numOk(x){ return Number.isFinite(x) && x > 0; }
-
-  function ellipsePerimeter(aSemi_m, bSemi_m){
-    const a = aSemi_m, b = bSemi_m;
-    return Math.PI * (3*(a+b) - Math.sqrt((3*a + b)*(a + 3*b)));
-  }
-
-  function tplRugRow(idx){
-    return `
-      <div class="rugRow" data-idx="${idx}">
-        <div class="rugTop">
-          <div class="rugTitle">Koberec #${idx+1}</div>
-          <button class="smallBtn" type="button" data-action="remove">Odebrat</button>
-        </div>
-
-        <div class="rugGrid">
-          <div>
-            <label>Tvar</label>
-            <select data-field="shape">
-              <option value="rect">Obdélník / čtverec</option>
-              <option value="circle">Kruh</option>
-              <option value="oval">Ovál (elipsa)</option>
-            </select>
-          </div>
-
-          <div data-box="rect">
-            <label>Šířka (cm)</label>
-            <input type="number" min="0" step="0.1" placeholder="např. 160" data-field="w">
-          </div>
-          <div data-box="rect">
-            <label>Délka (cm)</label>
-            <input type="number" min="0" step="0.1" placeholder="např. 230" data-field="h">
-          </div>
-
-          <div data-box="circle" style="display:none;">
-            <label>Průměr (cm)</label>
-            <input type="number" min="0" step="0.1" placeholder="např. 200" data-field="d">
-          </div>
-          <div data-box="circle" style="display:none;">
-            <label>&nbsp;</label>
-            <div class="mini">Plocha = π × (d/2)²</div>
-          </div>
-
-          <div data-box="oval" style="display:none;">
-            <label>Hlavní osa (cm)</label>
-            <input type="number" min="0" step="0.1" placeholder="např. 240" data-field="a">
-          </div>
-          <div data-box="oval" style="display:none;">
-            <label>Vedlejší osa (cm)</label>
-            <input type="number" min="0" step="0.1" placeholder="např. 160" data-field="b">
-          </div>
-        </div>
-
-        <div class="rugOpts">
-          <label style="display:flex; gap:10px; align-items:center; margin:0;">
-            <input type="checkbox" style="width:auto; transform: translateY(1px);" data-field="edge">
-            <span>Obšívání (${PRICE_EDGE_PER_M} Kč / m)</span>
-          </label>
-          <label style="display:flex; gap:10px; align-items:center; margin:0;">
-            <input type="checkbox" style="width:auto; transform: translateY(1px);" data-field="imp">
-            <span>Impregnace (${PRICE_IMP_PER_M2} Kč / m²)</span>
-          </label>
-        </div>
-
-        <div class="rugOut">
-          <div class="boxy">
-            <div class="mini">Plocha</div>
-            <div class="val" data-out="area">— m²</div>
-          </div>
-          <div class="boxy">
-            <div class="mini">Obvod</div>
-            <div class="val" data-out="perim">— m</div>
-          </div>
-          <div class="boxy">
-            <div class="mini">Cena (orientačně)</div>
-            <div class="val" data-out="total">— Kč</div>
-            <div class="mini" data-out="break" style="margin-top:6px;">Vyplň rozměry</div>
-          </div>
-        </div>
+  if (!places.length) {
+    placesListEl.innerHTML = `
+      <div class="card" style="padding:12px; box-shadow:none;">
+        Žádná sběrná místa nebyla načtena.
       </div>
     `;
+    return;
   }
 
-  function updateRowNumbering(){
-    const rows = [...rugsEl.querySelectorAll('.rugRow')];
-    rows.forEach((row, i) => {
-      row.dataset.idx = String(i);
-      row.querySelector('.rugTitle').textContent = `Koberec #${i+1}`;
+  placesListEl.innerHTML = places.map(place => `
+    <div class="card" style="padding:12px; box-shadow:none;">
+      <div style="font-weight:950; margin-bottom:6px;">${escapeHtml(place.name)}</div>
+      ${place.address ? `<div class="mini" style="margin-bottom:6px;">${escapeHtml(place.address)}</div>` : ""}
+      ${place.hours ? `<div class="mini">Otevírací doba: ${escapeHtml(place.hours)}</div>` : ""}
+      ${place.phone ? `<div class="mini">Tel: <a href="tel:${escapeHtml(place.phone)}">${escapeHtml(place.phone)}</a></div>` : ""}
+      ${place.email ? `<div class="mini">Email: <a href="mailto:${escapeHtml(place.email)}">${escapeHtml(place.email)}</a></div>` : ""}
+      ${place.web ? `<div class="mini">Web: <a href="${escapeHtml(place.web)}" target="_blank" rel="noopener noreferrer">${escapeHtml(place.web)}</a></div>` : ""}
+    </div>
+  `).join("");
+}
+
+function clearMarkers() {
+  markers.forEach(marker => marker.setMap(null));
+  markers = [];
+}
+
+function renderMarkers(places) {
+  if (!map || !window.google?.maps) return;
+
+  clearMarkers();
+
+  const validPlaces = places.filter(place =>
+    Number.isFinite(place.lat) && Number.isFinite(place.lng)
+  );
+
+  if (!validPlaces.length) {
+    setStatus("Místa byla načtena, ale chybí souřadnice lat/lng.");
+    return;
+  }
+
+  const bounds = new google.maps.LatLngBounds();
+
+  validPlaces.forEach(place => {
+    const marker = new google.maps.Marker({
+      position: { lat: place.lat, lng: place.lng },
+      map,
+      title: place.name
     });
+
+    marker.addListener("click", () => {
+      infoWindow.setContent(buildInfoContent(place));
+      infoWindow.open(map, marker);
+    });
+
+    markers.push(marker);
+    bounds.extend(marker.getPosition());
+  });
+
+  if (validPlaces.length === 1) {
+    map.setCenter({ lat: validPlaces[0].lat, lng: validPlaces[0].lng });
+    map.setZoom(13);
+  } else {
+    map.fitBounds(bounds, 60);
   }
 
-  function showShapeBoxes(row, shape){
-    row.querySelectorAll('[data-box="rect"]').forEach(el => el.style.display = (shape === 'rect') ? '' : 'none');
-    row.querySelectorAll('[data-box="circle"]').forEach(el => el.style.display = (shape === 'circle') ? '' : 'none');
-    row.querySelectorAll('[data-box="oval"]').forEach(el => el.style.display = (shape === 'oval') ? '' : 'none');
-  }
+  setStatus(`Načteno sběrných míst: ${validPlaces.length}`);
+}
 
-  function getField(row, name){
-    const el = row.querySelector(`[data-field="${name}"]`);
-    if(!el) return null;
-    if(el.type === 'checkbox') return el.checked;
-    return el.value;
-  }
+function distanceKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
 
-  function computeRow(row){
-    const shape = getField(row, 'shape');
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
 
-    let areaM2 = 0;
-    let perimM = 0;
-    let valid = true;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
-    if(shape === 'rect'){
-      const w = parseFloat(getField(row, 'w'));
-      const h = parseFloat(getField(row, 'h'));
-      if(!numOk(w) || !numOk(h)) valid = false;
-      if(valid){
-        const w_m = w/100;
-        const h_m = h/100;
-        areaM2 = w_m * h_m;
-        perimM = 2 * (w_m + h_m);
-      }
-    }
+function sortPlacesByDistance(lat, lng) {
+  const sorted = [...placesCache].sort((a, b) => {
+    if (!Number.isFinite(a.lat) || !Number.isFinite(a.lng)) return 1;
+    if (!Number.isFinite(b.lat) || !Number.isFinite(b.lng)) return -1;
 
-    if(shape === 'circle'){
-      const d = parseFloat(getField(row, 'd'));
-      if(!numOk(d)) valid = false;
-      if(valid){
-        const r_m = (d/100)/2;
-        areaM2 = Math.PI * r_m * r_m;
-        perimM = Math.PI * (d/100);
-      }
-    }
+    const da = distanceKm(lat, lng, a.lat, a.lng);
+    const db = distanceKm(lat, lng, b.lat, b.lng);
+    return da - db;
+  });
 
-    if(shape === 'oval'){
-      const a = parseFloat(getField(row, 'a'));
-      const b = parseFloat(getField(row, 'b'));
-      if(!numOk(a) || !numOk(b)) valid = false;
-      if(valid){
-        const aSemi_m = (a/100)/2;
-        const bSemi_m = (b/100)/2;
-        areaM2 = Math.PI * aSemi_m * bSemi_m;
-        perimM = ellipsePerimeter(aSemi_m, bSemi_m);
-      }
-    }
+  renderPlacesList(sorted);
+}
 
-    if(!valid){
-      return { valid:false, areaM2:0, perimM:0, cleanCost:0, edgeCost:0, impCost:0, total:0 };
-    }
+function initMap() {
+  if (!window.google?.maps || map) return;
 
-    areaM2 = round2(areaM2);
-    perimM = round2(perimM);
+  map = new google.maps.Map(mapEl, {
+    center: { lat: 50.0755, lng: 14.4378 },
+    zoom: 10,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: true
+  });
 
-    const edge = !!getField(row, 'edge');
-    const imp = !!getField(row, 'imp');
+  geocoder = new google.maps.Geocoder();
+  infoWindow = new google.maps.InfoWindow();
+}
 
-    const cleanCost = Math.round(areaM2 * PRICE_CLEAN_PER_M2);
-    const edgeCost  = edge ? Math.round(perimM * PRICE_EDGE_PER_M) : 0;
-    const impCost   = imp  ? Math.round(areaM2 * PRICE_IMP_PER_M2) : 0;
-
-    const total = cleanCost + edgeCost + impCost;
-    return { valid:true, areaM2, perimM, cleanCost, edgeCost, impCost, total };
-  }
-
-  function renderRowOutputs(row, r){
-    const areaEl = row.querySelector('[data-out="area"]');
-    const perEl = row.querySelector('[data-out="perim"]');
-    const totEl = row.querySelector('[data-out="total"]');
-    const brEl = row.querySelector('[data-out="break"]');
-
-    if(!r.valid){
-      areaEl.textContent = '— m²';
-      perEl.textContent = '— m';
-      totEl.textContent = '— Kč';
-      brEl.textContent = 'Vyplň rozměry';
+function loadGoogleMapsApi() {
+  return new Promise((resolve, reject) => {
+    if (window.google?.maps) {
+      resolve();
       return;
     }
 
-    areaEl.textContent = `${r.areaM2} m²`;
-    perEl.textContent = `${r.perimM} m`;
-    totEl.textContent = `${czk(r.total)} Kč`;
-
-    brEl.innerHTML = [
-      `Čištění: ${czk(r.cleanCost)} Kč`,
-      `Obšívání: ${czk(r.edgeCost)} Kč`,
-      `Impregnace: ${czk(r.impCost)} Kč`,
-    ].join('<br>');
-  }
-
-  function computeAll(){
-    const rows = [...rugsEl.querySelectorAll('.rugRow')];
-
-    let sumArea = 0, sumPer = 0, sumClean = 0, sumEdge = 0, sumImp = 0, sumTotal = 0;
-
-    rows.forEach(row => {
-      const shape = getField(row, 'shape');
-      showShapeBoxes(row, shape);
-
-      const r = computeRow(row);
-      renderRowOutputs(row, r);
-
-      if(r.valid){
-        sumArea += r.areaM2;
-        sumPer += r.perimM;
-        sumClean += r.cleanCost;
-        sumEdge += r.edgeCost;
-        sumImp += r.impCost;
-        sumTotal += r.total;
-      }
-    });
-
-    sumArea = round2(sumArea);
-    sumPer  = round2(sumPer);
-
-    sumAreaEl.textContent = rows.length ? `${sumArea} m²` : '— m²';
-    sumPerimEl.textContent = rows.length ? `${sumPer} m` : '— m';
-    sumTotalEl.textContent = rows.length ? `${czk(sumTotal)} Kč` : '— Kč';
-
-    if(!rows.length){
-      sumBreakdownEl.textContent = '—';
+    const apiKey = cleanStr(CFG.GOOGLE_MAPS_API_KEY);
+    if (!apiKey) {
+      reject(new Error("Chybí GOOGLE_MAPS_API_KEY v config.js."));
       return;
     }
 
-    sumBreakdownEl.innerHTML = [
-      `Čištění: ${czk(sumClean)} Kč`,
-      `Obšívání: ${czk(sumEdge)} Kč`,
-      `Impregnace: ${czk(sumImp)} Kč`,
-    ].join('<br>');
-  }
-
-  function debounce(fn, wait){
-    let t = null;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), wait);
-    };
-  }
-  const computeAllDebounced = debounce(computeAll, 80);
-
-  function addRug(){
-    const idx = rugsEl.querySelectorAll('.rugRow').length;
-    rugsEl.insertAdjacentHTML('beforeend', tplRugRow(idx));
-    computeAll();
-  }
-
-  function resetRugs(){
-    rugsEl.innerHTML = '';
-    addRug();
-  }
-
-  if (rugsEl){
-    rugsEl.addEventListener('input', (e) => {
-      const t = e.target;
-      if(t && t.matches('input, select')){
-        computeAllDebounced();
-      }
-    });
-    rugsEl.addEventListener('change', () => computeAll());
-    rugsEl.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-action="remove"]');
-      if(!btn) return;
-      const row = btn.closest('.rugRow');
-      if(!row) return;
-      row.remove();
-      updateRowNumbering();
-      computeAll();
-    });
-  }
-
-  addRugBtn?.addEventListener('click', addRug);
-  resetRugsBtn?.addEventListener('click', resetRugs);
-  if (rugsEl) resetRugs();
-
-  // ====== PLACES: load from Google Sheets CSV and render list ======
-  const placesListEl = document.getElementById('placesList');
-  const mapStatusEl = document.getElementById('mapStatus');
-
-  function renderPlaces(places){
-    if(!placesListEl) return;
-
-    if(!places.length){
-      placesListEl.innerHTML = `
-        <div class="card" style="padding:12px; box-shadow:none; background:rgba(255,255,255,.92);">
-          <div style="font-weight:950;">Žádná sběrná místa</div>
-          <div class="mini">Zkontroluj data v Google Sheets (řádky) a sdílení.</div>
-        </div>
-      `;
+    const existingScript = document.querySelector('script[data-google-maps="1"]');
+    if (existingScript) {
+      existingScript.addEventListener("load", resolve, { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("Google Maps API se nepodařilo načíst.")), { once: true });
       return;
     }
 
-    placesListEl.innerHTML = places.map(p => {
-      const name = escapeHtml(p.name || "Sběrné místo");
-      const address = escapeHtml(p.address || "");
-      const hours = escapeHtml(p.hours || "");
-      const phone = cleanStr(p.phone);
-      const email = cleanStr(p.email);
-      const web = cleanStr(p.web);
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
+    script.async = true;
+    script.defer = true;
+    script.dataset.googleMaps = "1";
+    script.onload = resolve;
+    script.onerror = () => reject(new Error("Google Maps API se nepodařilo načíst."));
+    document.head.appendChild(script);
+  });
+}
 
-      const phoneLink = phone ? `<div class="mini"><strong>Tel:</strong> <a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a></div>` : "";
-      const emailLink = email ? `<div class="mini"><strong>Email:</strong> <a href="mailto:${escapeHtml(email)}">${escapeHtml(email)}</a></div>` : "";
-      const webLink = web ? `<div class="mini"><strong>Web:</strong> <a href="${escapeHtml(web)}" target="_blank" rel="noopener noreferrer">${escapeHtml(web)}</a></div>` : "";
-      const hoursLine = hours ? `<div class="mini"><strong>Otevírací doba:</strong> ${hours}</div>` : "";
+async function loadPlaces() {
+  const url = cleanStr(CFG.PLACES_DATA_URL);
 
-      return `
-        <div class="card" style="padding:12px; box-shadow:none; background:rgba(255,255,255,.92);">
-          <div style="font-weight:950; letter-spacing:-.2px;">${name}</div>
-          ${address ? `<div class="mini" style="margin-top:4px;">${address}</div>` : ""}
-          <div style="height:10px"></div>
-          ${hoursLine}
-          ${phoneLink}
-          ${emailLink}
-          ${webLink}
-        </div>
-      `;
-    }).join("");
+  if (!url) {
+    setStatus("Chybí PLACES_DATA_URL v config.js.");
+    renderPlacesList([]);
+    return;
   }
 
-  async function loadPlaces(){
-    const url = cleanStr(CFG.PLACES_DATA_URL);
+  setStatus("Načítám sběrná místa...");
 
-    if(!placesListEl && !mapStatusEl) return;
+  try {
+    const separator = url.includes("?") ? "&" : "?";
+    const res = await fetch(`${url}${separator}v=${Date.now()}`);
 
-    if(!url){
-      if(mapStatusEl) mapStatusEl.textContent = 'Chybí PLACES_DATA_URL v config.js.';
-      renderPlaces([]);
+    if (!res.ok) {
+      throw new Error(`Nepodařilo se načíst data (${res.status}).`);
+    }
+
+    const text = await res.text();
+
+    if (text.toLowerCase().includes("<html")) {
+      throw new Error("Google Sheet není veřejně nasdílený jako CSV.");
+    }
+
+    const rows = parseCSV(text);
+
+    const places = rows.map(row => ({
+      name: pick(row, ["name", "nazev", "název"]),
+      address: pick(row, ["address", "adresa"]),
+      hours: pick(row, ["hours", "oteviracidoba", "oteviraci_doba", "otevíracídoba", "oteviracka"]),
+      phone: pick(row, ["phone", "telefon", "tel"]),
+      email: pick(row, ["email", "e-mail"]),
+      web: pick(row, ["web", "url", "website"]),
+      lat: toNum(pick(row, ["lat", "latitude"])),
+      lng: toNum(pick(row, ["lng", "lon", "long", "longitude"]))
+    })).filter(place => place.name || place.address);
+
+    placesCache = places;
+
+    renderPlacesList(places);
+    await loadGoogleMapsApi();
+    initMap();
+    renderMarkers(places);
+  } catch (err) {
+    setStatus(err.message || "Chyba při načítání mapy.");
+    renderPlacesList([]);
+  }
+}
+
+function searchByAddress() {
+  const address = cleanStr(addrInput?.value);
+
+  if (!address) {
+    alert("Zadej adresu.");
+    return;
+  }
+
+  if (!geocoder || !map) {
+    alert("Mapa ještě není připravená.");
+    return;
+  }
+
+  geocoder.geocode({ address }, (results, status) => {
+    if (status !== "OK" || !results?.length) {
+      alert("Adresu se nepodařilo najít.");
       return;
     }
 
-    if(mapStatusEl) mapStatusEl.textContent = 'Načítám sběrná místa…';
+    const location = results[0].geometry.location;
+    const lat = location.lat();
+    const lng = location.lng();
 
-    try{
-      // cache-bust aby reload opravdu reloadnul
-      const bust = (url.includes("?") ? "&" : "?") + "v=" + Date.now();
-      const res = await fetch(url + bust, { method:'GET' });
+    map.setCenter({ lat, lng });
+    map.setZoom(12);
 
-      if(!res.ok){
-        if(mapStatusEl) mapStatusEl.textContent = `Nepodařilo se stáhnout data (${res.status}). Zkontroluj sdílení tabulky.`;
-        renderPlaces([]);
+    if (userMarker) userMarker.setMap(null);
+
+    userMarker = new google.maps.Marker({
+      position: { lat, lng },
+      map,
+      title: "Hledaná adresa"
+    });
+
+    sortPlacesByDistance(lat, lng);
+    setStatus("Seřazeno podle zadané adresy.");
+  });
+}
+
+function useCurrentLocation() {
+  if (!navigator.geolocation) {
+    alert("Tento prohlížeč nepodporuje geolokaci.");
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    position => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+
+      if (!map) {
+        alert("Mapa ještě není připravená.");
         return;
       }
 
-      const text = await res.text();
+      map.setCenter({ lat, lng });
+      map.setZoom(12);
 
-      // když to není CSV, často to bude HTML login stránka
-      if(text.toLowerCase().includes("<html") || text.toLowerCase().includes("accounts.google.com")){
-        if(mapStatusEl) mapStatusEl.textContent = 'Google vrátil HTML (login). Dej tabulku na „Kdokoli s odkazem – Prohlížeč“.';
-        renderPlaces([]);
-        return;
-      }
+      if (userMarker) userMarker.setMap(null);
 
-      const raw = csvToObjects(text);
+      userMarker = new google.maps.Marker({
+        position: { lat, lng },
+        map,
+        title: "Vaše poloha"
+      });
 
-      // map + validace
-      const places = raw.map(r => {
-        const lat = toNum(r.lat);
-        const lng = toNum(r.lng);
-        return {
-          name: cleanStr(r.name),
-          address: cleanStr(r.address),
-          hours: cleanStr(r.hours),
-          phone: cleanStr(r.phone),
-          email: cleanStr(r.email),
-          web: cleanStr(r.web),
-          lat, lng
-        };
-      }).filter(p => p.name || p.address);
-
-      renderPlaces(places);
-
-      if(mapStatusEl){
-        mapStatusEl.textContent = `Načteno: ${places.length} míst. (Mapa zatím není napojená.)`;
-      }
-    }catch(err){
-      if(mapStatusEl) mapStatusEl.textContent = 'Chyba při načítání dat. (Síť / CORS / sdílení tabulky)';
-      renderPlaces([]);
+      sortPlacesByDistance(lat, lng);
+      setStatus("Seřazeno podle aktuální polohy.");
+    },
+    () => {
+      alert("Nepodařilo se získat aktuální polohu.");
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0
     }
-  }
+  );
+}
 
-  // Tlačítko “Znovu načíst místa”
-  document.getElementById('reloadBtn')?.addEventListener('click', loadPlaces);
+searchAddrBtn?.addEventListener("click", searchByAddress);
+geoBtn?.addEventListener("click", useCurrentLocation);
+reloadBtn?.addEventListener("click", loadPlaces);
 
-  // Auto-load při startu
-  loadPlaces();
-
-  // Map placeholder
-  document.getElementById('geoBtn')?.addEventListener('click', () => {
-    alert('Poloha a mapa budou doplněny později. Teď jen ověřujeme, že data ze Sheets tečou do seznamu.');
-  });
-  document.getElementById('searchAddrBtn')?.addEventListener('click', () => {
-    alert('Vyhledávání podle adresy doplníme až s Google Maps API. Teď jen seznam z Google Sheets.');
-  });
-
-})();
+document.addEventListener("DOMContentLoaded", loadPlaces);
