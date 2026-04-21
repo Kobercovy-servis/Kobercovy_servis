@@ -623,7 +623,49 @@
       </div>
     </div>
   </section>
+  <section id="spoluprace" class="whiteSection">
+  <div class="wrap">
+    <h2 class="sectionTitle">Spolupráce</h2>
+    <p class="muted">
+      Máte zájem o spolupráci, sběrné místo nebo jinou formu partnerství? Napište nám
+      a ozveme se zpět.
+    </p>
 
+    <div class="formGrid">
+      <div class="card formCard">
+        <form id="cooperationForm" action="https://formspree.io/f/xqedanbl" method="POST">
+          <div class="formRow" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div>
+              <label for="coopName">Název firmy / provozovny</label>
+              <input id="coopName" name="Nazev firmy nebo provozovny" type="text" placeholder="Např. Čistírna XY" required>
+            </div>
+            <div>
+              <label for="coopPhone">Telefon</label>
+              <input id="coopPhone" name="Telefon" type="tel" placeholder="+420 ..." required>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;">
+            <label for="coopAbout">Něco málo o vás</label>
+            <textarea id="coopAbout" name="Neco malo o vas" placeholder="Napište krátce, kdo jste, kde působíte a jakou spolupráci si představujete." required></textarea>
+          </div>
+
+          <input type="hidden" name="_subject" value="Spolupráce z webu — Kobercový servis">
+
+          <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <button class="btn btnPrimary" type="submit">Odeslat zájem o spolupráci</button>
+          </div>
+
+          <div class="divider"></div>
+          <div class="mini">
+            Případně můžete napsat přímo na
+            <a href="mailto:info@kobercovyservis.cz" style="color:rgba(37,99,235,.95); font-weight:950;">info@kobercovyservis.cz</a>.
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
   <section id="kontakt" class="whiteSection">
     <div class="wrap">
       <h2 class="sectionTitle">Kontakt</h2>
