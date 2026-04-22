@@ -390,8 +390,6 @@ function useCurrentLocation() {
 searchAddrBtn?.addEventListener("click", searchByAddress);
 geoBtn?.addEventListener("click", useCurrentLocation);
 reloadBtn?.addEventListener("click", loadPlaces);
-
-document.addEventListener("DOMContentLoaded", loadPlaces);
 // ===== KALKULAČKA KOBERCŮ =====
 const rugsEl = document.getElementById("rugs");
 const addRugBtn = document.getElementById("addRugBtn");
@@ -421,9 +419,36 @@ function formatCzk(value) {
   }).format(Math.round(value))} Kč`;
 }
 
-function calcRug(widthCm, lengthCm, hasEdge, hasImp) {
-  const area = (widthCm * lengthCm) / 10000;
-  const perimeter = (2 * (widthCm + lengthCm)) / 100;
+function calcRug(shape, aCm, bCm, hasEdge, hasImp) {
+  let area = 0;
+  let perimeter = 0;
+
+  if (shape === "rectangle") {
+    area = (aCm * bCm) / 10000;
+    perimeter = (2 * (aCm + bCm)) / 100;
+  }
+
+  if (shape === "square") {
+    area = (aCm * aCm) / 10000;
+    perimeter = (4 * aCm) / 100;
+  }
+
+  if (shape === "circle") {
+    const diameterM = aCm / 100;
+    const radiusM = diameterM / 2;
+    area = Math.PI * radiusM * radiusM;
+    perimeter = Math.PI * diameterM;
+  }
+
+  if (shape === "ellipse") {
+    const semiA = (aCm / 100) / 2;
+    const semiB = (bCm / 100) / 2;
+    area = Math.PI * semiA * semiB;
+    perimeter =
+      Math.PI *
+      (3 * (semiA + semiB) -
+        Math.sqrt((3 * semiA + semiB) * (semiA + 3 * semiB)));
+  }
 
   const cleanPrice = area * PRICE_CLEAN;
   const edgePrice = hasEdge ? perimeter * PRICE_EDGE : 0;
@@ -450,12 +475,22 @@ function getRugHtml(id) {
 
       <div class="rugGrid">
         <div>
-          <label>Šířka (cm)</label>
+          <label>Tvar</label>
+          <select class="rugShape">
+            <option value="rectangle">Obdélník</option>
+            <option value="square">Čtverec</option>
+            <option value="circle">Kruh</option>
+            <option value="ellipse">Elipsa</option>
+          </select>
+        </div>
+
+        <div class="rugDimA">
+          <label class="rugLabelA">Šířka (cm)</label>
           <input type="number" class="rugWidth" min="1" step="1" placeholder="Např. 160">
         </div>
 
-        <div>
-          <label>Délka (cm)</label>
+        <div class="rugDimB">
+          <label class="rugLabelB">Délka (cm)</label>
           <input type="number" class="rugLength" min="1" step="1" placeholder="Např. 230">
         </div>
 
@@ -490,7 +525,52 @@ function getRugHtml(id) {
   `;
 }
 
-function addRug(defaultWidth = "", defaultLength = "", defaultEdge = false, defaultImp = false) {
+function syncRugFields(row) {
+  const shape = row.querySelector(".rugShape")?.value || "rectangle";
+  const labelA = row.querySelector(".rugLabelA");
+  const labelB = row.querySelector(".rugLabelB");
+  const inputA = row.querySelector(".rugWidth");
+  const inputB = row.querySelector(".rugLength");
+  const dimBBox = row.querySelector(".rugDimB");
+
+  if (!labelA || !labelB || !inputA || !inputB || !dimBBox) return;
+
+  if (shape === "rectangle") {
+    labelA.textContent = "Šířka (cm)";
+    labelB.textContent = "Délka (cm)";
+    inputA.placeholder = "Např. 160";
+    inputB.placeholder = "Např. 230";
+    inputB.disabled = false;
+    dimBBox.style.display = "";
+  }
+
+  if (shape === "square") {
+    labelA.textContent = "Strana (cm)";
+    inputA.placeholder = "Např. 200";
+    inputB.value = "";
+    inputB.disabled = true;
+    dimBBox.style.display = "none";
+  }
+
+  if (shape === "circle") {
+    labelA.textContent = "Průměr (cm)";
+    inputA.placeholder = "Např. 180";
+    inputB.value = "";
+    inputB.disabled = true;
+    dimBBox.style.display = "none";
+  }
+
+  if (shape === "ellipse") {
+    labelA.textContent = "Hlavní průměr (cm)";
+    labelB.textContent = "Vedlejší průměr (cm)";
+    inputA.placeholder = "Např. 220";
+    inputB.placeholder = "Např. 160";
+    inputB.disabled = false;
+    dimBBox.style.display = "";
+  }
+}
+
+function addRug(defaultShape = "rectangle", defaultA = "", defaultB = "", defaultEdge = false, defaultImp = false) {
   if (!rugsEl) return;
 
   rugCounter += 1;
@@ -499,18 +579,21 @@ function addRug(defaultWidth = "", defaultLength = "", defaultEdge = false, defa
   const row = rugsEl.querySelector(`.rugRow[data-rug-id="${rugCounter}"]`);
   if (!row) return;
 
-  row.querySelector(".rugWidth").value = defaultWidth;
-  row.querySelector(".rugLength").value = defaultLength;
+  row.querySelector(".rugShape").value = defaultShape;
+  row.querySelector(".rugWidth").value = defaultA;
+  row.querySelector(".rugLength").value = defaultB;
   row.querySelector(".rugEdge").checked = defaultEdge;
   row.querySelector(".rugImp").checked = defaultImp;
 
+  syncRugFields(row);
   updateSingleRug(row);
   updateSummary();
 }
 
 function updateSingleRug(row) {
-  const width = Number(row.querySelector(".rugWidth")?.value) || 0;
-  const length = Number(row.querySelector(".rugLength")?.value) || 0;
+  const shape = row.querySelector(".rugShape")?.value || "rectangle";
+  const a = Number(row.querySelector(".rugWidth")?.value) || 0;
+  const b = Number(row.querySelector(".rugLength")?.value) || 0;
   const hasEdge = !!row.querySelector(".rugEdge")?.checked;
   const hasImp = !!row.querySelector(".rugImp")?.checked;
 
@@ -518,7 +601,10 @@ function updateSingleRug(row) {
   const perimEl = row.querySelector(".rugPerim");
   const totalEl = row.querySelector(".rugTotal");
 
-  if (width <= 0 || length <= 0) {
+  const needsOnlyA = shape === "square" || shape === "circle";
+  const invalid = needsOnlyA ? a <= 0 : a <= 0 || b <= 0;
+
+  if (invalid) {
     if (areaEl) areaEl.textContent = "— m²";
     if (perimEl) perimEl.textContent = "— m";
     if (totalEl) totalEl.textContent = "— Kč";
@@ -531,7 +617,7 @@ function updateSingleRug(row) {
     return;
   }
 
-  const result = calcRug(width, length, hasEdge, hasImp);
+  const result = calcRug(shape, a, b, hasEdge, hasImp);
 
   if (areaEl) areaEl.textContent = `${formatNum(result.area)} m²`;
   if (perimEl) perimEl.textContent = `${formatNum(result.perimeter)} m`;
@@ -603,6 +689,11 @@ rugsEl?.addEventListener("input", (e) => {
 rugsEl?.addEventListener("change", (e) => {
   const row = e.target.closest(".rugRow");
   if (!row) return;
+
+  if (e.target.classList.contains("rugShape")) {
+    syncRugFields(row);
+  }
+
   updateSingleRug(row);
   updateSummary();
 });
@@ -636,3 +727,5 @@ rugsEl?.addEventListener("click", (e) => {
 if (rugsEl && !rugsEl.children.length) {
   addRug();
 }
+document.addEventListener("DOMContentLoaded", loadPlaces);
+
