@@ -392,3 +392,247 @@ geoBtn?.addEventListener("click", useCurrentLocation);
 reloadBtn?.addEventListener("click", loadPlaces);
 
 document.addEventListener("DOMContentLoaded", loadPlaces);
+// ===== KALKULAČKA KOBERCŮ =====
+const rugsEl = document.getElementById("rugs");
+const addRugBtn = document.getElementById("addRugBtn");
+const resetRugsBtn = document.getElementById("resetRugsBtn");
+
+const sumAreaEl = document.getElementById("sumArea");
+const sumPerimEl = document.getElementById("sumPerim");
+const sumBreakdownEl = document.getElementById("sumBreakdown");
+const sumTotalEl = document.getElementById("sumTotal");
+
+const PRICE_CLEAN = Number(CFG.PRICE_CLEAN_PER_M2) || 300;
+const PRICE_EDGE = Number(CFG.PRICE_EDGE_PER_M) || 99;
+const PRICE_IMP = Number(CFG.PRICE_IMP_PER_M2) || 40;
+
+let rugCounter = 0;
+
+function formatNum(value, decimals = 2) {
+  return new Intl.NumberFormat("cs-CZ", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: decimals
+  }).format(value);
+}
+
+function formatCzk(value) {
+  return `${new Intl.NumberFormat("cs-CZ", {
+    maximumFractionDigits: 0
+  }).format(Math.round(value))} Kč`;
+}
+
+function calcRug(widthCm, lengthCm, hasEdge, hasImp) {
+  const area = (widthCm * lengthCm) / 10000;
+  const perimeter = (2 * (widthCm + lengthCm)) / 100;
+
+  const cleanPrice = area * PRICE_CLEAN;
+  const edgePrice = hasEdge ? perimeter * PRICE_EDGE : 0;
+  const impPrice = hasImp ? area * PRICE_IMP : 0;
+  const total = cleanPrice + edgePrice + impPrice;
+
+  return {
+    area,
+    perimeter,
+    cleanPrice,
+    edgePrice,
+    impPrice,
+    total
+  };
+}
+
+function getRugHtml(id) {
+  return `
+    <div class="rugRow" data-rug-id="${id}">
+      <div class="rugTop">
+        <div class="rugTitle">Koberec ${id}</div>
+        <button class="smallBtn removeRugBtn" type="button">Odebrat</button>
+      </div>
+
+      <div class="rugGrid">
+        <div>
+          <label>Šířka (cm)</label>
+          <input type="number" class="rugWidth" min="1" step="1" placeholder="Např. 160">
+        </div>
+
+        <div>
+          <label>Délka (cm)</label>
+          <input type="number" class="rugLength" min="1" step="1" placeholder="Např. 230">
+        </div>
+
+        <div>
+          <label>Volby</label>
+          <div class="rugOpts">
+            <label style="margin:0; display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" class="rugEdge" style="width:auto;"> Obšívání
+            </label>
+            <label style="margin:0; display:flex; gap:8px; align-items:center;">
+              <input type="checkbox" class="rugImp" style="width:auto;"> Impregnace
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="rugOut">
+        <div class="boxy">
+          <div class="mini">Plocha</div>
+          <div class="val rugArea">— m²</div>
+        </div>
+        <div class="boxy">
+          <div class="mini">Obvod</div>
+          <div class="val rugPerim">— m</div>
+        </div>
+        <div class="boxy">
+          <div class="mini">Cena</div>
+          <div class="val rugTotal">— Kč</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function addRug(defaultWidth = "", defaultLength = "", defaultEdge = false, defaultImp = false) {
+  if (!rugsEl) return;
+
+  rugCounter += 1;
+  rugsEl.insertAdjacentHTML("beforeend", getRugHtml(rugCounter));
+
+  const row = rugsEl.querySelector(`.rugRow[data-rug-id="${rugCounter}"]`);
+  if (!row) return;
+
+  row.querySelector(".rugWidth").value = defaultWidth;
+  row.querySelector(".rugLength").value = defaultLength;
+  row.querySelector(".rugEdge").checked = defaultEdge;
+  row.querySelector(".rugImp").checked = defaultImp;
+
+  updateSingleRug(row);
+  updateSummary();
+}
+
+function updateSingleRug(row) {
+  const width = Number(row.querySelector(".rugWidth")?.value) || 0;
+  const length = Number(row.querySelector(".rugLength")?.value) || 0;
+  const hasEdge = !!row.querySelector(".rugEdge")?.checked;
+  const hasImp = !!row.querySelector(".rugImp")?.checked;
+
+  const areaEl = row.querySelector(".rugArea");
+  const perimEl = row.querySelector(".rugPerim");
+  const totalEl = row.querySelector(".rugTotal");
+
+  if (width <= 0 || length <= 0) {
+    if (areaEl) areaEl.textContent = "— m²";
+    if (perimEl) perimEl.textContent = "— m";
+    if (totalEl) totalEl.textContent = "— Kč";
+    row.dataset.area = "0";
+    row.dataset.perimeter = "0";
+    row.dataset.cleanPrice = "0";
+    row.dataset.edgePrice = "0";
+    row.dataset.impPrice = "0";
+    row.dataset.total = "0";
+    return;
+  }
+
+  const result = calcRug(width, length, hasEdge, hasImp);
+
+  if (areaEl) areaEl.textContent = `${formatNum(result.area)} m²`;
+  if (perimEl) perimEl.textContent = `${formatNum(result.perimeter)} m`;
+  if (totalEl) totalEl.textContent = formatCzk(result.total);
+
+  row.dataset.area = String(result.area);
+  row.dataset.perimeter = String(result.perimeter);
+  row.dataset.cleanPrice = String(result.cleanPrice);
+  row.dataset.edgePrice = String(result.edgePrice);
+  row.dataset.impPrice = String(result.impPrice);
+  row.dataset.total = String(result.total);
+}
+
+function updateSummary() {
+  const rows = [...document.querySelectorAll(".rugRow")];
+
+  let sumArea = 0;
+  let sumPerim = 0;
+  let sumClean = 0;
+  let sumEdge = 0;
+  let sumImp = 0;
+  let sumTotal = 0;
+
+  rows.forEach((row) => {
+    sumArea += Number(row.dataset.area || 0);
+    sumPerim += Number(row.dataset.perimeter || 0);
+    sumClean += Number(row.dataset.cleanPrice || 0);
+    sumEdge += Number(row.dataset.edgePrice || 0);
+    sumImp += Number(row.dataset.impPrice || 0);
+    sumTotal += Number(row.dataset.total || 0);
+  });
+
+  if (sumAreaEl) sumAreaEl.textContent = `${formatNum(sumArea)} m²`;
+  if (sumPerimEl) sumPerimEl.textContent = `${formatNum(sumPerim)} m`;
+
+  if (sumBreakdownEl) {
+    sumBreakdownEl.innerHTML = `
+      Čištění: ${formatCzk(sumClean)}<br>
+      Obšívání: ${formatCzk(sumEdge)}<br>
+      Impregnace: ${formatCzk(sumImp)}
+    `;
+  }
+
+  if (sumTotalEl) sumTotalEl.textContent = formatCzk(sumTotal);
+}
+
+function resetCalculator() {
+  if (!rugsEl) return;
+  rugsEl.innerHTML = "";
+  rugCounter = 0;
+  addRug();
+}
+
+addRugBtn?.addEventListener("click", () => {
+  addRug();
+});
+
+resetRugsBtn?.addEventListener("click", () => {
+  resetCalculator();
+});
+
+rugsEl?.addEventListener("input", (e) => {
+  const row = e.target.closest(".rugRow");
+  if (!row) return;
+  updateSingleRug(row);
+  updateSummary();
+});
+
+rugsEl?.addEventListener("change", (e) => {
+  const row = e.target.closest(".rugRow");
+  if (!row) return;
+  updateSingleRug(row);
+  updateSummary();
+});
+
+rugsEl?.addEventListener("click", (e) => {
+  const btn = e.target.closest(".removeRugBtn");
+  if (!btn) return;
+
+  const row = btn.closest(".rugRow");
+  if (!row) return;
+
+  row.remove();
+
+  const remaining = [...document.querySelectorAll(".rugRow")];
+  if (!remaining.length) {
+    rugCounter = 0;
+    addRug();
+    return;
+  }
+
+  remaining.forEach((item, index) => {
+    item.dataset.rugId = String(index + 1);
+    const title = item.querySelector(".rugTitle");
+    if (title) title.textContent = `Koberec ${index + 1}`;
+  });
+
+  rugCounter = remaining.length;
+  updateSummary();
+});
+
+if (rugsEl && !rugsEl.children.length) {
+  addRug();
+}
