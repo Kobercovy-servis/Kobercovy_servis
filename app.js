@@ -141,8 +141,7 @@ function clearMarkers() {
   markers.forEach(marker => marker.setMap(null));
   markers = [];
 }
-
-function renderMarkers(places) {
+function renderMarkers(places, extraPoint = null) {
   if (!map || !window.google?.maps) return;
 
   clearMarkers();
@@ -174,7 +173,11 @@ function renderMarkers(places) {
     bounds.extend(marker.getPosition());
   });
 
-  if (validPlaces.length === 1) {
+  if (extraPoint && Number.isFinite(extraPoint.lat) && Number.isFinite(extraPoint.lng)) {
+    bounds.extend(extraPoint);
+  }
+
+  if (validPlaces.length === 1 && !extraPoint) {
     map.setCenter({ lat: validPlaces[0].lat, lng: validPlaces[0].lng });
     map.setZoom(13);
   } else {
