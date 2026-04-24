@@ -11,6 +11,7 @@ const reloadBtn = document.getElementById("reloadBtn");
 let map;
 let geocoder;
 let infoWindow;
+let addressAutocomplete;
 let markers = [];
 let userMarker = null;
 let placesCache = [];
