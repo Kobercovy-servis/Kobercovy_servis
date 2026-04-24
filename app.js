@@ -198,7 +198,7 @@ function distanceKm(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function sortPlacesByDistance(lat, lng) {
+function sortPlacesByDistance(lat, lng, limit = null) {
   const sorted = [...placesCache].sort((a, b) => {
     if (!Number.isFinite(a.lat) || !Number.isFinite(a.lng)) return 1;
     if (!Number.isFinite(b.lat) || !Number.isFinite(b.lng)) return -1;
@@ -208,7 +208,10 @@ function sortPlacesByDistance(lat, lng) {
     return da - db;
   });
 
-  renderPlacesList(sorted);
+  const result = limit ? sorted.slice(0, limit) : sorted;
+
+  renderPlacesList(result);
+  renderMarkers(result);
 }
 
 function initMap() {
