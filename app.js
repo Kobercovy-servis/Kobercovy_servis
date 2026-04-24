@@ -225,6 +225,39 @@ function initMap() {
 
   geocoder = new google.maps.Geocoder();
   infoWindow = new google.maps.InfoWindow();
+  if (addrInput && google.maps.places) {
+  addressAutocomplete = new google.maps.places.Autocomplete(addrInput, {
+    types: ["address"],
+    componentRestrictions: { country: "cz" },
+    fields: ["geometry", "formatted_address", "name"]
+  });
+
+  addressAutocomplete.addListener("place_changed", () => {
+    const place = addressAutocomplete.getPlace();
+
+    if (!place.geometry || !place.geometry.location) {
+      return;
+    }
+
+    const lat = place.geometry.location.lat();
+    const lng = place.geometry.location.lng();
+
+    addrInput.value = place.formatted_address || place.name || addrInput.value;
+
+    if (userMarker) userMarker.setMap(null);
+
+    userMarker = new google.maps.Marker({
+      position: { lat, lng },
+      map,
+      title: "Hledaná adresa"
+    });
+
+    const sorted = sortPlacesByDistance(lat, lng, 8);
+    renderPlacesList(sorted);
+    renderMarkers(sorted, { lat, lng });
+    setStatus("Zobrazeno 8 nejbližších sběrných míst podle zadané adresy.");
+  });
+}
 }
 
 function loadGoogleMapsApi() {
