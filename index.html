@@ -348,7 +348,14 @@
   font-size:13px;
   font-weight:900;
 }
-    .cards{padding:8px; display:grid; gap:4px; overflow:auto}
+    .cards{
+  padding:8px;
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:8px;
+  overflow:auto;
+  align-items:start;
+}
 
     /* Form */
    .formGrid{
