@@ -126,7 +126,7 @@ function renderPlacesList(places) {
   }
 
   placesListEl.innerHTML = places.map(place => `
-    <div class="card" style="padding:12px; box-shadow:none;">
+    <div class="card" style="padding:8px; box-shadow:none;">
       <div style="font-weight:950; margin-bottom:6px;">${escapeHtml(place.name)}</div>
       ${place.address ? `<div class="mini" style="margin-bottom:6px;">${escapeHtml(place.address)}</div>` : ""}
       ${place.hours ? `<div class="mini">Otevírací doba: ${escapeHtml(place.hours)}</div>` : ""}
