@@ -636,7 +636,6 @@ function updateSingleRug(row) {
   row.dataset.impPrice = String(result.impPrice);
   row.dataset.total = String(result.total);
 }
-
 function updateSummary() {
   const rows = [...document.querySelectorAll(".rugRow")];
 
