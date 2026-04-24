@@ -197,22 +197,18 @@ function distanceKm(lat1, lng1, lat2, lng2) {
 
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
-
 function sortPlacesByDistance(lat, lng, limit = null) {
-  const sorted = [...placesCache].sort((a, b) => {
-    if (!Number.isFinite(a.lat) || !Number.isFinite(a.lng)) return 1;
-    if (!Number.isFinite(b.lat) || !Number.isFinite(b.lng)) return -1;
+  const sorted = [...placesCache]
+    .filter(place => Number.isFinite(place.lat) && Number.isFinite(place.lng))
+    .sort((a, b) => {
+      const da = distanceKm(lat, lng, a.lat, a.lng);
+      const db = distanceKm(lat, lng, b.lat, b.lng);
+      return da - db;
+    });
 
-    const da = distanceKm(lat, lng, a.lat, a.lng);
-    const db = distanceKm(lat, lng, b.lat, b.lng);
-    return da - db;
-  });
-
-  const result = limit ? sorted.slice(0, limit) : sorted;
-
-  renderPlacesList(result);
-  renderMarkers(result);
+  return limit ? sorted.slice(0, limit) : sorted;
 }
+
 
 function initMap() {
   if (!window.google?.maps || map) return;
