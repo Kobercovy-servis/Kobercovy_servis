@@ -377,7 +377,9 @@ function useCurrentLocation() {
         title: "Vaše poloha"
       });
 
-      sortPlacesByDistance(lat, lng, 8);
+      const nearest = sortPlacesByDistance(lat, lng, 8);
+renderPlacesList(nearest);
+renderMarkers(nearest, { lat, lng });
 setStatus("Zobrazeno 8 nejbližších sběrných míst podle aktuální polohy.");
     },
     () => {
