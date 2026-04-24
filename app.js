@@ -141,7 +141,8 @@ function clearMarkers() {
   markers.forEach(marker => marker.setMap(null));
   markers = [];
 }
-function renderMarkers(places, extraPoint = null) {
+
+function renderMarkers(places) {
   if (!map || !window.google?.maps) return;
 
   clearMarkers();
@@ -173,11 +174,7 @@ function renderMarkers(places, extraPoint = null) {
     bounds.extend(marker.getPosition());
   });
 
-  if (extraPoint && Number.isFinite(extraPoint.lat) && Number.isFinite(extraPoint.lng)) {
-    bounds.extend(extraPoint);
-  }
-
-  if (validPlaces.length === 1 && !extraPoint) {
+  if (validPlaces.length === 1) {
     map.setCenter({ lat: validPlaces[0].lat, lng: validPlaces[0].lng });
     map.setZoom(13);
   } else {
@@ -200,18 +197,19 @@ function distanceKm(lat1, lng1, lat2, lng2) {
 
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
-function sortPlacesByDistance(lat, lng, limit = null) {
-  const sorted = [...placesCache]
-    .filter(place => Number.isFinite(place.lat) && Number.isFinite(place.lng))
-    .sort((a, b) => {
-      const da = distanceKm(lat, lng, a.lat, a.lng);
-      const db = distanceKm(lat, lng, b.lat, b.lng);
-      return da - db;
-    });
 
-  return limit ? sorted.slice(0, limit) : sorted;
+function sortPlacesByDistance(lat, lng) {
+  const sorted = [...placesCache].sort((a, b) => {
+    if (!Number.isFinite(a.lat) || !Number.isFinite(a.lng)) return 1;
+    if (!Number.isFinite(b.lat) || !Number.isFinite(b.lng)) return -1;
+
+    const da = distanceKm(lat, lng, a.lat, a.lng);
+    const db = distanceKm(lat, lng, b.lat, b.lng);
+    return da - db;
+  });
+
+  renderPlacesList(sorted);
 }
-
 
 function initMap() {
   if (!window.google?.maps || map) return;
@@ -343,10 +341,8 @@ function searchByAddress() {
       title: "Hledaná adresa"
     });
 
-    const sorted = sortPlacesByDistance(lat, lng, 8);
-renderPlacesList(sorted);
-renderMarkers(sorted, { lat, lng });
-setStatus("Seřazeno podle zadané adresy.");
+    sortPlacesByDistance(lat, lng);
+    setStatus("Seřazeno podle zadané adresy.");
   });
 }
 
@@ -377,10 +373,8 @@ function useCurrentLocation() {
         title: "Vaše poloha"
       });
 
-      const nearest = sortPlacesByDistance(lat, lng, 8);
-renderPlacesList(nearest);
-renderMarkers(nearest, { lat, lng });
-setStatus("Zobrazeno 8 nejbližších sběrných míst podle aktuální polohy.");
+      sortPlacesByDistance(lat, lng);
+      setStatus("Seřazeno podle aktuální polohy.");
     },
     () => {
       alert("Nepodařilo se získat aktuální polohu.");
@@ -636,6 +630,7 @@ function updateSingleRug(row) {
   row.dataset.impPrice = String(result.impPrice);
   row.dataset.total = String(result.total);
 }
+
 function updateSummary() {
   const rows = [...document.querySelectorAll(".rugRow")];
 
@@ -733,9 +728,4 @@ if (rugsEl && !rugsEl.children.length) {
   addRug();
 }
 document.addEventListener("DOMContentLoaded", loadPlaces);
-addrInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    searchByAddress();
-  }
-});
+
