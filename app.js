@@ -343,8 +343,10 @@ function searchByAddress() {
       title: "Hledaná adresa"
     });
 
-    sortPlacesByDistance(lat, lng);
-    setStatus("Seřazeno podle zadané adresy.");
+    const sorted = sortPlacesByDistance(lat, lng);
+renderPlacesList(sorted);
+renderMarkers(sorted, { lat, lng });
+setStatus("Seřazeno podle zadané adresy.");
   });
 }
 
