@@ -343,7 +343,7 @@ function searchByAddress() {
       title: "Hledaná adresa"
     });
 
-    const sorted = sortPlacesByDistance(lat, lng);
+    const sorted = sortPlacesByDistance(lat, lng, 8);
 renderPlacesList(sorted);
 renderMarkers(sorted, { lat, lng });
 setStatus("Seřazeno podle zadané adresy.");
@@ -733,4 +733,9 @@ if (rugsEl && !rugsEl.children.length) {
   addRug();
 }
 document.addEventListener("DOMContentLoaded", loadPlaces);
-
+addrInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    searchByAddress();
+  }
+});
